@@ -1,5 +1,7 @@
 # Big2
 
+![Big2 瀏覽器版遊玩畫面](docs/images/gameplay.jpg)
+
 大老二（台灣規則），2~4 人，真人玩家 0 或 1 人，其餘座位由 [jev](https://openrouter.ai/typesafe/jev-1.13)（OpenRouter 上的 decision model）擔任 AI 對手。有命令列版跟瀏覽器版，共用同一套規則與 AI 邏輯。完整規則與架構設計見 [DESIGN.md](DESIGN.md)。
 
 ## 安裝需求
