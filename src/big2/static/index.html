@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大老二</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="setup-screen" class="screen">
+  <h1>大老二</h1>
+  <div class="setup-field">
+    <label for="setup-players">人數</label>
+    <select id="setup-players">
+      <option value="2">2 人</option>
+      <option value="3">3 人</option>
+      <option value="4" selected>4 人</option>
+    </select>
+  </div>
+  <div class="setup-field">
+    <label for="setup-human">真人玩家</label>
+    <select id="setup-human">
+      <option value="1" selected>1（你 + AI）</option>
+      <option value="0">0（純觀戰，AI 對打）</option>
+    </select>
+  </div>
+  <button id="setup-start" class="primary">開始</button>
+  <p id="setup-error" class="error"></p>
+</section>
+
+<section id="game-screen" class="screen hidden">
+  <div id="table">
+    <div id="pool"></div>
+  </div>
+
+  <div id="controls-bar" class="hidden">
+    <p id="turn-msg"></p>
+    <div id="controls">
+      <button id="pass-btn">過牌</button>
+      <button id="play-btn" class="primary">出牌</button>
+    </div>
+    <p id="move-error" class="error"></p>
+  </div>
+
+  <div id="log"></div>
+</section>
+
+<section id="gameover-screen" class="screen hidden">
+  <h2 id="winner-msg"></h2>
+  <button id="restart-btn" class="primary">再玩一局</button>
+</section>
+
+<div id="loading-overlay" class="hidden">
+  <div class="spinner"></div>
+  <p>牌局進行中…</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

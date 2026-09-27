@@ -2,10 +2,24 @@
 
 ## 技術棧
 - 語言：Python
-- 執行方式：`uv run big2`（uv 專案，`pyproject.toml` 管理相依套件）
-- HTTP client：`requests`
+- 執行方式：`uv run big2`（CLI）或 `uv run big2 --server`（瀏覽器版，uv 專案，`pyproject.toml` 管理相依套件）
+- HTTP client（呼叫 jev）：`requests`
+- Web server：Flask，靜態檔案（`src/big2/static/index.html`/`app.js`/`style.css`）+ 幾個 JSON API
 - AI 對手：OpenRouter `POST https://openrouter.ai/api/alpha/decisions`，model `typesafe/jev-1.13`
 - API key：環境變數 `OPENROUTER_API_KEY`
+
+## 架構：CLI 與瀏覽器版共用的部分
+- `game.py` 的 `GameEngine`（誰的回合、目前要求的牌型、一輪全過牌後控制權回到最後出牌者、有人出完牌）是兩種介面共用的核心狀態機，`apply(move)` 是唯一的變動入口
+- CLI（`run_game`）直接在 `GameEngine` 上為每個座位（含真人）阻塞呼叫 `Controller.choose_move`
+- 瀏覽器版（`web.py`）不會對真人座位呼叫 `choose_move`（那會卡在 `input()`）：真人的出牌由 HTTP request 提供，經 `validate_move` 驗證合法性後直接 `GameEngine.apply`；AI 座位則用 `run_ai_batch` 連續跑，直到又輪到真人或遊戲結束才回傳
+- 兩種介面都用同一個 `AIController`（同一套呼叫 jev、重試、fallback 的邏輯）與同一個 `GameLogger`（`logs/game-<timestamp>.jsonl`）
+
+## 瀏覽器版 API（單一全域對局，無 session id）
+- `GET /`：回應 `static/index.html`
+- `POST /api/new_game` `{players, human}`：開新局，回傳到「輪到真人（或遊戲結束）」為止的事件記錄 + 當前狀態
+- `POST /api/move` `{indices}`：真人出牌（`indices` 是目前手牌排序後的 1-based 編號，空陣列＝過牌），回傳這手牌之後連續 AI 回合的事件記錄 + 當前狀態
+- `GET /api/state`：目前狀態快照（給重新整理頁面用，不含事件記錄）
+- 前端拿到的事件記錄會逐筆播放動畫，而不是瞬間跳到最終狀態；為什麼用「同步算完整批才回傳」而不是即時串流，見 [docs/adr/0001-sync-request-response-for-web-turns.md](docs/adr/0001-sync-request-response-for-web-turns.md)
 
 ## 規則（台灣常見版本）
 - 單張大小：3 最小、2 最大；花色破同點數的平手（黑桃>紅心>方塊>梅花）

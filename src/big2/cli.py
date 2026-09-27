@@ -13,6 +13,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="big2", description="大老二 CLI（台灣規則）")
     parser.add_argument("--players", type=int, choices=(2, 3, 4), help="總人數 (2-4)")
     parser.add_argument("--human", type=int, choices=(0, 1), help="真人玩家人數 (0 或 1)")
+    parser.add_argument("--server", action="store_true", help="改用瀏覽器操作：啟動 web server，人數設定改在網頁上選")
+    parser.add_argument("--port", type=int, default=8765, help="--server 模式監聽的 port（預設 8765）")
     return parser.parse_args(argv)
 
 
@@ -33,6 +35,14 @@ def _prompt_choice(prompt_text: str, choices: tuple[int, ...]) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
+
+    if args.server:
+        from .web import create_app
+
+        print(f"大老二 web 版：http://127.0.0.1:{args.port}/")
+        create_app().run(host="127.0.0.1", port=args.port)
+        return
+
     num_players = args.players or _prompt_choice("幾人遊戲？", (2, 3, 4))
     num_humans = args.human if args.human is not None else _prompt_choice("真人玩家人數？", (0, 1))
 
