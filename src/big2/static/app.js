@@ -280,6 +280,33 @@ function applyState(state) {
 
 // -- actions --------------------------------------------------------------
 
+/** Replay the supplied response, then fetch one AI turn at a time.
+ * data contains events and state; updates the table and controls until a
+ * human turn or winner. Displays AI request errors without enabling moves
+ * on an AI turn. Resolves once playback stops.
+ */
+async function playTurns(data) {
+  els.controlsBar.classList.remove("hidden");
+  els.playBtn.disabled = true;
+  els.passBtn.disabled = true;
+  if (hasHuman) setHumanSeatEnabled(false);
+  try {
+    while (true) {
+      await new Promise((resolve) => playEvents(data.events, resolve));
+      if (data.state.finished || data.state.current_is_human) {
+        applyState(data.state);
+        return;
+      }
+      // Refresh the human hand after its move, before waiting on the next AI.
+      if (hasHuman) renderHumanHand(data.state.human_hand);
+      els.turnMsg.textContent = hasHuman ? "等待 AI 出牌…" : "觀戰中，等待 AI 出牌…";
+      data = await postJSON("/api/ai_turn", {});
+    }
+  } catch (err) {
+    els.turnMsg.textContent = err.message;
+  }
+}
+
 async function submitMove(indices) {
   els.playBtn.disabled = true;
   els.passBtn.disabled = true;
@@ -287,7 +314,7 @@ async function submitMove(indices) {
   setHumanSeatEnabled(false);
   try {
     const data = await postJSON("/api/move", { indices });
-    playEvents(data.events, () => applyState(data.state));
+    await playTurns(data);
   } catch (err) {
     els.moveError.textContent = err.message;
     els.playBtn.disabled = false;
@@ -323,7 +350,7 @@ async function startGame() {
     });
 
     showScreen("game");
-    playEvents(data.events, () => applyState(data.state));
+    await playTurns(data);
   } catch (err) {
     showLoading(false);
     els.setupError.textContent = err.message;

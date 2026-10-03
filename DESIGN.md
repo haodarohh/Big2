@@ -11,7 +11,7 @@
 ## 架構：CLI 與瀏覽器版共用的部分
 - `game.py` 的 `GameEngine`（誰的回合、目前要求的牌型、一輪全過牌後控制權回到最後出牌者、有人出完牌）是兩種介面共用的核心狀態機，`apply(move)` 是唯一的變動入口
 - CLI（`run_game`）直接在 `GameEngine` 上為每個座位（含真人）阻塞呼叫 `Controller.choose_move`
-- 瀏覽器版（`web.py`）不會對真人座位呼叫 `choose_move`（那會卡在 `input()`）：真人的出牌由 HTTP request 提供，經 `validate_move` 驗證合法性後直接 `GameEngine.apply`；AI 座位則用 `run_ai_batch` 連續跑，直到又輪到真人或遊戲結束才回傳
+- 瀏覽器版（`web.py`）不會對真人座位呼叫 `choose_move`（那會卡在 `input()`）：真人的出牌由 HTTP request 提供，經 `validate_move` 驗證合法性後直接 `GameEngine.apply`；開局先回傳初始牌桌，真人出牌只回傳該手事件；對戰與觀戰皆由 `/api/ai_turn` 每次前進一個 AI 回合，直到輪到真人或遊戲結束
 - 兩種介面都用同一個 `AIController`（同一套呼叫 jev、重試、fallback 的邏輯）與同一個 `GameLogger`（`logs/game-<timestamp>.jsonl`）
 
 ## 瀏覽器版 API（單一全域對局，無 session id）
@@ -19,7 +19,7 @@
 - `POST /api/new_game` `{players, human}`：開新局，回傳到「輪到真人（或遊戲結束）」為止的事件記錄 + 當前狀態
 - `POST /api/move` `{indices}`：真人出牌（`indices` 是目前手牌排序後的 1-based 編號，空陣列＝過牌），回傳這手牌之後連續 AI 回合的事件記錄 + 當前狀態
 - `GET /api/state`：目前狀態快照（給重新整理頁面用，不含事件記錄）
-- 前端拿到的事件記錄會逐筆播放動畫，而不是瞬間跳到最終狀態；為什麼用「同步算完整批才回傳」而不是即時串流，見 [docs/adr/0001-sync-request-response-for-web-turns.md](docs/adr/0001-sync-request-response-for-web-turns.md)
+- 前端拿到的事件記錄會逐筆播放動畫，而不是瞬間跳到最終狀態；為什麼用「同步逐回合請求」而不是即時串流，見 [docs/adr/0001-sync-request-response-for-web-turns.md](docs/adr/0001-sync-request-response-for-web-turns.md)
 
 ## 規則（台灣常見版本）
 - 單張大小：3 最小、2 最大；花色破同點數的平手（黑桃>紅心>方塊>梅花）
@@ -97,7 +97,7 @@
 ## 已知風險
 - 完整歷史與既有大候選集增加模型輸入負擔；依需求不截斷歷史或裁切候選。
 - 測試證明資料與策略提示正確傳遞，無法保證模型遵循程度或勝率提升。
-- 網頁路徑透過實際使用的 `run_ai_batch` 驗證；未測 live browser 或真實模型對局。
+- 網頁路徑透過 Flask test client 驗證開局、真人出牌與逐回合 AI 請求；未測 live browser 或真實模型對局。
 - `typesafe/jev-1.13` 為 OpenRouter alpha 服務（`/api/alpha/decisions`），且回傳為機率式選擇，非保證選中最優解；重試機制與自動過牌 fallback 是為了避免遊戲卡死
 
 ## AI 局勢與人格的測試驗證

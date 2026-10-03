@@ -2,12 +2,11 @@
 
 There is exactly one game in memory at a time (`_STATE`, module-level) —
 this is a single local player's page, not a multi-tenant server (see ADR
-0001 for why turns are handled synchronously instead of streamed). Every
-request that changes the game (`/api/new_game`, `/api/move`) runs the
-engine forward with `run_ai_batch` until it's the human seat's turn again
-(or the game ends) and returns the full list of `TurnEvent`s from that
-batch alongside the resulting snapshot — the frontend replays that list as
-an animation instead of jumping straight to the final state.
+0001 for why turns are handled synchronously instead of streamed). Opening
+returns the initial table immediately; human moves return only their own
+applied event. `/api/ai_turn` advances one AI turn per request in either
+mode, returning its event and snapshot for frontend playback before the
+next turn. `/api/spectate` retains the spectator-only route.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from .game import (
     IllegalMoveError,
     TurnEvent,
     deal,
-    run_ai_batch,
     validate_move,
 )
 from .logging_util import GameLogger
@@ -78,7 +76,32 @@ def create_app() -> Flask:
         ]
         _STATE = GameSession(engine=engine, controllers=controllers, is_human=is_human)
 
-        events = run_ai_batch(_STATE.engine, _STATE.controllers, _STATE.is_human)
+        return jsonify(events=[], state=_serialize_state(_STATE))
+
+    @app.post("/api/spectate")
+    @app.post("/api/ai_turn")
+    def ai_turn():
+        """Advance one AI turn and return its event and state.
+
+        Takes no parameters; invokes the current AI and logs its applied
+        move. Finished games return no events without another model call.
+        """
+        if _STATE is None:
+            return jsonify(error="尚未開局"), 404
+        if request.path == "/api/spectate" and _STATE.has_human:
+            return jsonify(error="只有純觀戰模式可使用"), 400
+        engine = _STATE.engine
+        events = []
+        if not engine.finished and _STATE.is_human[engine.current]:
+            return jsonify(error="現在是你的回合"), 400
+        if not engine.finished:
+            controller = _STATE.controllers[engine.current]
+            move = controller.choose_move(
+                engine.hand, engine.required, engine.is_leading,
+                engine.must_include_3c and engine.is_leading,
+                context=engine.turn_context(),
+            )
+            events.append(engine.apply(move))
         return jsonify(events=[_serialize_event(e) for e in events], state=_serialize_state(_STATE))
 
     @app.get("/api/state")
@@ -113,7 +136,6 @@ def create_app() -> Flask:
             return jsonify(error=str(exc)), 400
 
         events = [_STATE.engine.apply(combo)]
-        events += run_ai_batch(_STATE.engine, _STATE.controllers, _STATE.is_human)
         return jsonify(events=[_serialize_event(e) for e in events], state=_serialize_state(_STATE))
 
     return app
