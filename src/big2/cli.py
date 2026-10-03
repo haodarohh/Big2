@@ -10,11 +10,13 @@ from .logging_util import GameLogger
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse optional CLI arguments, returning game and web server settings."""
     parser = argparse.ArgumentParser(prog="big2", description="大老二 CLI（台灣規則）")
     parser.add_argument("--players", type=int, choices=(2, 3, 4), help="總人數 (2-4)")
     parser.add_argument("--human", type=int, choices=(0, 1), help="真人玩家人數 (0 或 1)")
-    parser.add_argument("--server", action="store_true", help="改用瀏覽器操作：啟動 web server，人數設定改在網頁上選")
-    parser.add_argument("--port", type=int, default=8765, help="--server 模式監聽的 port（預設 8765）")
+    parser.add_argument("--server-mode", action="store_true", help="改用瀏覽器操作：啟動 web server，人數設定改在網頁上選")
+    parser.add_argument("--host", default="127.0.0.1", help="--server-mode 模式監聽的 host（預設 127.0.0.1）")
+    parser.add_argument("--port", type=int, default=8765, help="--server-mode 模式監聽的 port（預設 8765）")
     return parser.parse_args(argv)
 
 
@@ -34,13 +36,14 @@ def _prompt_choice(prompt_text: str, choices: tuple[int, ...]) -> int:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Run a game or web server using optional CLI arguments; return None."""
     args = parse_args(argv)
 
-    if args.server:
+    if args.server_mode:
         from .web import create_app
 
-        print(f"大老二 web 版：http://127.0.0.1:{args.port}/")
-        create_app().run(host="127.0.0.1", port=args.port)
+        print(f"大老二 web 版：http://{args.host}:{args.port}/")
+        create_app().run(host=args.host, port=args.port)
         return
 
     num_players = args.players or _prompt_choice("幾人遊戲？", (2, 3, 4))

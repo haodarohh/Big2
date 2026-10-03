@@ -23,8 +23,8 @@ uv run big2 --players 2 --human 0   # 2 人局，純觀戰（AI 對打）
 ## 執行（瀏覽器版）
 ```sh
 export OPENROUTER_API_KEY=sk-or-...
-uv run big2 --server            # 預設監聽 http://127.0.0.1:8765/
-uv run big2 --server --port 9000
+uv run big2 --server-mode            # 預設監聽 http://127.0.0.1:8765/
+uv run big2 --server-mode --host 0.0.0.0 --port 9000
 ```
 啟動後打開印出來的網址即可開始，人數與真人玩家人數改在網頁上選。同一時間只支援一局（單一全域對局，沒有 session），適合一個人在自己電腦上玩，不是多人連線對戰。
 

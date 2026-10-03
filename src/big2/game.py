@@ -26,6 +26,28 @@ from .rules import Combo, HandType, beats, classify
 
 MAX_JEV_RETRIES = 5
 
+PERSONALITIES = {
+    "balanced": "Balance preserving strong combinations, gaining control, and making progress toward emptying your hand.",
+    "conservative": "Prefer preserving strong cards and combinations; avoid unnecessary contests and pass when saving control cards is more useful.",
+    "aggressive": "Be more willing to spend strong cards to gain control and accelerate emptying your hand.",
+}
+
+
+@dataclass(frozen=True)
+class TurnContext:
+    """Public facts before a decision, with no hidden hands or mutable references.
+
+    Seat names and remaining counts share seat order; current_seat identifies
+    the choosing player. last_play_seat is None before the first play.
+    History contains chronological descriptions of completed public turns.
+    Constructing a snapshot has no side effects.
+    """
+    seat_names: tuple[str, ...]
+    remaining: tuple[int, ...]
+    current_seat: int
+    last_play_seat: int | None
+    history: tuple[str, ...]
+
 
 def deal(num_players: int, rng=None) -> list[list[Card]]:
     if num_players not in (2, 3, 4):
@@ -53,18 +75,32 @@ def find_starting_player(hands: list[list[Card]]) -> int:
 
 
 class Controller(Protocol):
+    """Seat controller contract: choose a legal move from private and public facts."""
+
     def choose_move(
-        self, hand: list[Card], required: Combo | None, is_leading: bool, must_include_3c: bool
+        self, hand: list[Card], required: Combo | None, is_leading: bool, must_include_3c: bool,
+        context: TurnContext | None = None,
     ) -> Combo | None:
+        """Return a legal combo or pass for hand and trick constraints.
+
+        context is an optional public snapshot; implementations may prompt a
+        human or call a model but must not mutate the supplied hand.
+        """
         ...
 
 
 @dataclass
 class HumanController:
+    """Human seat named name; prompt supplies input and choose_move prints feedback."""
     name: str
     prompt: Callable[[str], str] = input  # overridable for testing
 
-    def choose_move(self, hand, required, is_leading, must_include_3c):
+    def choose_move(self, hand, required, is_leading, must_include_3c, context=None):
+        """Prompt until hand/trick constraints yield a legal combo or pass.
+
+        context is accepted for the shared contract but unused. Prints the
+        hand and validation feedback without changing the supplied cards.
+        """
         sorted_hand = sorted(hand)
         while True:
             _render_hand(sorted_hand)
@@ -102,10 +138,26 @@ class HumanController:
 
 @dataclass
 class AIController:
+    """Model-backed seat with name, decision logger and configurable personality.
+
+    personality selects prompt guidance only; legal checks remain unchanged.
+    """
     name: str
     logger: GameLogger
+    personality: str = "balanced"
 
-    def choose_move(self, hand, required, is_leading, must_include_3c):
+    def __post_init__(self) -> None:
+        """Reject unknown personality settings before any external call occurs."""
+        if self.personality not in PERSONALITIES:
+            raise ValueError(f"unknown AI personality: {self.personality!r}")
+
+    def choose_move(self, hand, required, is_leading, must_include_3c, context=None):
+        """Return a validated combo or pass using hand, trick and public context.
+
+        Calls the model and writes decision logs, retrying up to five times;
+        exhaustion passes or leads the smallest permitted single. Does not
+        change hand or context or compute strategic option scores.
+        """
         candidates = all_combos(hand)
         if must_include_3c:
             candidates = [c for c in candidates if THREE_OF_CLUBS in c.cards]
@@ -115,7 +167,9 @@ class AIController:
         if not is_leading:
             options["pass"] = "Pass — play no cards this turn"
 
-        state = _describe_state(self.name, hand, required, is_leading, must_include_3c)
+        state = _describe_state(
+            self.name, hand, required, is_leading, must_include_3c, context, self.personality
+        )
         feedback = ""
 
         for attempt in range(1, MAX_JEV_RETRIES + 1):
@@ -166,12 +220,35 @@ def _describe_combo(combo: Combo) -> str:
     return f"{combo.type.name} ({cards})"
 
 
-def _describe_state(name: str, hand: list[Card], required: Combo | None, is_leading: bool, must_include_3c: bool) -> str:
+def _describe_state(
+    name: str, hand: list[Card], required: Combo | None, is_leading: bool, must_include_3c: bool,
+    context: TurnContext | None = None, personality: str = "balanced",
+) -> str:
+    """Render private hand and public facts with strategy guidance, without scoring moves."""
     hand_str = " ".join(str(c) for c in sorted(hand))
     lines = [
         "You are playing 大老二 (Taiwanese Big Two).",
+        f"You are {name}.",
         f"Your hand ({len(hand)} cards): {hand_str}",
+        "Rules: ranks ascend 3,4,5,6,7,8,9,10,J,Q,K,A,2; suits ascend clubs,diamonds,hearts,spades. "
+        "Only equal card counts can beat one another. Five-card categories ascend straight,full house,four-of-a-kind,straight flush. "
+        "A plain flush is invalid; 2 cannot be in a straight.",
+        f"Personality: {personality}. {PERSONALITIES[personality]}",
+        "Your goal is to empty your hand first. Judge for yourself how each move affects your remaining hand, "
+        "including whether it breaks strong combinations. Use public history and opponents' remaining counts "
+        "to decide whether to keep pressing or pass. Prioritize going out immediately and consider blocking "
+        "opponents who are close to going out. A pass does not prove a player has no beating cards.",
     ]
+    if context is not None:
+        lines.extend([
+            f"Your seat: {context.current_seat} ({context.seat_names[context.current_seat]})",
+            "Seat order: " + " -> ".join(f"{i}={n}" for i, n in enumerate(context.seat_names)),
+            "Remaining cards: " + ", ".join(f"{n}={c}" for n, c in zip(context.seat_names, context.remaining)),
+        ])
+        last = context.last_play_seat
+        lines.append("Last player to play: " + ("none" if last is None else f"{last} ({context.seat_names[last]})"))
+        lines.append("History:" if context.history else "History: no turns yet")
+        lines.extend(f"{i}. {event}" for i, event in enumerate(context.history, 1))
     if is_leading:
         lines.append("You are leading this trick: you may play any combo from the options.")
         if must_include_3c:
@@ -209,9 +286,15 @@ class GameEngine:
     current trick requires, and the "3♣ must open, a round of passes
     returns control to the last player who played" rules. `apply()` is the
     only mutator — it takes an already-legal move for the current seat and
-    returns a `TurnEvent` describing what happened."""
+    returns a `TurnEvent` describing what happened. Public events persist in
+    history across trick resets; turn_context exposes an independent public
+    snapshot, never other seats' hidden cards."""
 
     def __init__(self, hands: list[list[Card]], names: list[str], logger: GameLogger) -> None:
+        """Copy hands and initialize turn/history state using names and logger.
+
+        Returns no value; requires a dealt 3♣ and does not log until apply.
+        """
         self.hands = [list(h) for h in hands]
         self.names = names
         self.logger = logger
@@ -221,6 +304,25 @@ class GameEngine:
         self.passes_in_a_row = 0
         self.must_include_3c = True
         self.winner_seat: int | None = None
+        self.history: list[TurnEvent] = []
+
+    def turn_context(self) -> TurnContext:
+        """Return independent public facts for the current seat, without exposing hands.
+
+        Takes no arguments, does not mutate the engine, and converts events
+        to strings so controllers cannot modify historical event snapshots.
+        """
+        history = tuple(
+            f"{event.player_name} passed" if event.combo is None
+            else f"{event.player_name} played {_describe_combo(event.combo)}"
+            for event in self.history
+        )
+        # leader is initialized before anyone plays, so only history can
+        # distinguish the starting seat from an actual last player to play.
+        return TurnContext(
+            tuple(self.names), tuple(len(h) for h in self.hands), self.current,
+            self.leader if self.history else None, history,
+        )
 
     @property
     def is_leading(self) -> bool:
@@ -235,6 +337,11 @@ class GameEngine:
         return self.hands[self.current]
 
     def apply(self, move: Combo | None) -> TurnEvent:
+        """Apply an already-legal combo or pass, returning and retaining its public event.
+
+        Mutates hands/trick/turn/winner state and writes the game log. History
+        survives trick resets and includes the winning turn.
+        """
         seat = self.current
         name = self.names[seat]
 
@@ -242,6 +349,7 @@ class GameEngine:
             self.passes_in_a_row += 1
             self.logger.log({"event": "pass", "player": name})
             event = TurnEvent(name, "pass", None, self._remaining())
+            self.history.append(event)
             # A full round of passes (everyone but the last player who
             # played) hands control back to that player with a clean slate.
             self.current = (self.current + 1) % self.n
@@ -259,6 +367,7 @@ class GameEngine:
         self.passes_in_a_row = 0
         self.logger.log({"event": "play", "player": name, "combo": _describe_combo(move)})
         event = TurnEvent(name, "play", move, self._remaining())
+        self.history.append(event)
 
         if not self.hands[seat]:
             self.winner_seat = seat
@@ -295,25 +404,34 @@ def run_ai_batch(engine: GameEngine, controllers: list[Controller], is_human: li
     human seat's turn or the game ends. Used by the web server, which gets
     the human seat's move from an HTTP request instead of a blocking
     `Controller.choose_move` call. With no human seats at all, this plays
-    the entire game out in one call."""
+    the entire game out in one call. Each controller receives fresh public
+    context. Returns applied events, mutating engine and writing its log;
+    controllers and is_human are aligned in seat order."""
     events: list[TurnEvent] = []
     while not engine.finished and not is_human[engine.current]:
         controller = controllers[engine.current]
         move = controller.choose_move(
-            engine.hand, engine.required, engine.is_leading, engine.must_include_3c and engine.is_leading
+            engine.hand, engine.required, engine.is_leading, engine.must_include_3c and engine.is_leading,
+            context=engine.turn_context(),
         )
         events.append(engine.apply(move))
     return events
 
 
 def run_game(hands: list[list[Card]], controllers: list[Controller], logger: GameLogger) -> GameResult:
+    """Play hands through controllers with fresh public snapshots until a winner.
+
+    Returns the winning seat/name; prints turns, invokes seat controllers and
+    logs applied moves. GameEngine copies the caller's hands before playing.
+    """
     names = [c.name for c in controllers]
     engine = GameEngine(hands, names, logger)
 
     while True:
         controller = controllers[engine.current]
         move = controller.choose_move(
-            engine.hand, engine.required, engine.is_leading, engine.must_include_3c and engine.is_leading
+            engine.hand, engine.required, engine.is_leading, engine.must_include_3c and engine.is_leading,
+            context=engine.turn_context(),
         )
         event = engine.apply(move)
 
