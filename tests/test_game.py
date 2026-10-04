@@ -9,7 +9,7 @@ import pytest
 from big2.ai_jev import JevError
 from big2.cards import THREE_OF_CLUBS, Card, Rank, Suit
 from big2.combos import all_combos
-from big2.game import AIController, GameEngine, deal, find_starting_player, run_ai_batch, run_game
+from big2.game import MAX_JEV_RETRIES, AIController, GameEngine, deal, find_starting_player, run_ai_batch, run_game
 from big2.logging_util import GameLogger
 from big2.rules import beats, classify
 
@@ -192,7 +192,7 @@ def test_following_falls_back_to_pass_after_errors(monkeypatch, tmp_path):
     monkeypatch.setattr("big2.game.request_choice", request)
     result = AIController("AI", logger).choose_move([THREE_OF_CLUBS], classify([Card(Rank.FIVE, Suit.CLUB)]), False, False)
     assert result is None
-    assert request.call_count == 5
+    assert request.call_count == MAX_JEV_RETRIES
     records = [json.loads(line) for line in logger.path.read_text().splitlines()]
     assert records[-1]["event"] == "ai_retries_exhausted"
 
@@ -204,7 +204,7 @@ def test_opening_falls_back_to_three_of_clubs_after_errors(monkeypatch, tmp_path
     monkeypatch.setattr("big2.game.request_choice", request)
     result = AIController("AI", logger).choose_move([Card(Rank.FIVE, Suit.CLUB), THREE_OF_CLUBS], None, True, True)
     assert result == classify([THREE_OF_CLUBS])
-    assert request.call_count == 5
+    assert request.call_count == MAX_JEV_RETRIES
     records = [json.loads(line) for line in logger.path.read_text().splitlines()]
     assert records[-1]["event"] == "ai_retries_exhausted"
 
@@ -217,4 +217,23 @@ def test_leading_falls_back_to_smallest_single_after_errors(monkeypatch, tmp_pat
     four = Card(Rank.FOUR, Suit.CLUB)
     result = AIController("AI", logger).choose_move([Card(Rank.FIVE, Suit.CLUB), four], None, True, False)
     assert result == classify([four])
-    assert request.call_count == 5
+    assert request.call_count == MAX_JEV_RETRIES
+
+
+def test_exhausted_retries_and_summary_are_logged(monkeypatch, tmp_path):
+    """Ten illegal picks log the fallback, and the winning play writes call totals."""
+    logger = GameLogger(tmp_path)
+    engine = GameEngine([[THREE_OF_CLUBS, Card(Rank.FOUR, Suit.CLUB)],
+                         [Card(Rank.THREE, Suit.DIAMOND), Card(Rank.FIVE, Suit.CLUB)]], ["P0", "P1"], logger)
+    engine.apply(classify([THREE_OF_CLUBS]))
+    engine.apply(classify([Card(Rank.FIVE, Suit.CLUB)]))
+    monkeypatch.setattr("big2.game.request_choice", Mock(return_value="opt_0"))
+    assert AIController("P0", logger).choose_move(engine.hand, engine.required, False, False, engine.turn_context()) is None
+    engine.apply(None)  # P0 passes after the failed turn; P1 plays out to win
+    engine.apply(classify([Card(Rank.THREE, Suit.DIAMOND)]))
+    records = [json.loads(line) for line in logger.path.read_text(encoding="utf-8").splitlines()]
+    exhausted = next(r for r in records if r["event"] == "ai_retries_exhausted")
+    assert exhausted["attempts"] == 10 and exhausted["fallback"] == "pass"
+    summary = records[-1]
+    assert summary == {**summary, "event": "ai_stats", "calls": 10, "failed_calls": 10,
+                       "request_errors": 0, "illegal_choices": 10, "turns_exhausted": 1}

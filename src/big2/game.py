@@ -24,7 +24,7 @@ from .combos import all_combos
 from .logging_util import GameLogger
 from .rules import Combo, HandType, beats, classify
 
-MAX_JEV_RETRIES = 5
+MAX_JEV_RETRIES = 10
 
 PERSONALITIES = {
     "balanced": "Balance preserving strong combinations, gaining control, and making progress toward emptying your hand.",
@@ -154,7 +154,7 @@ class AIController:
     def choose_move(self, hand, required, is_leading, must_include_3c, context=None):
         """Return a validated combo or pass using hand, trick and public context.
 
-        Calls the model and writes decision logs, retrying up to five times;
+        Calls the model and writes decision logs, retrying up to MAX_JEV_RETRIES times;
         exhaustion passes or leads the smallest permitted single. Does not
         change hand or context or compute strategic option scores.
         """
@@ -203,11 +203,20 @@ class AIController:
                 f"current required combo {_describe_combo(required)}. Choose a different option, or 'pass'.)"
             )
 
-        self.logger.log({"event": "ai_retries_exhausted", "player": self.name})
-        if not is_leading:
-            return None
-        singles = [c for c in candidates if c.type == HandType.SINGLE]
-        return min(singles, key=lambda combo: combo.strength)
+        # Record what the fallback is so a failed turn is visible in the log,
+        # not just that retries ran out.
+        if is_leading:
+            singles = [c for c in candidates if c.type == HandType.SINGLE]
+            fallback_combo = min(singles, key=lambda combo: combo.strength)
+            fallback = f"lead smallest single {_describe_combo(fallback_combo)}"
+        else:
+            fallback_combo = None
+            fallback = "pass"
+        self.logger.log({
+            "event": "ai_retries_exhausted", "player": self.name,
+            "attempts": MAX_JEV_RETRIES, "fallback": fallback,
+        })
+        return fallback_combo
 
 
 def _render_hand(sorted_hand: list[Card]) -> None:
@@ -371,6 +380,9 @@ class GameEngine:
 
         if not self.hands[seat]:
             self.winner_seat = seat
+            # Game over: write the AI call totals once, here, so CLI and web
+            # both get them without each wiring its own end-of-game hook.
+            self.logger.log_ai_summary()
         else:
             self.current = (self.current + 1) % self.n
         return event
