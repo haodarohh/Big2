@@ -8,6 +8,13 @@
 - [uv](https://docs.astral.sh/uv/)
 - OpenRouter API key（放在環境變數 `OPENROUTER_API_KEY`）— 只有真的要讓 AI 出牌時才需要，AI 每次出牌都會呼叫一次 jev API 並產生費用
 
+### 改用其他 OpenRouter decision model（選用）
+預設用 jev。支援 [OpenRouter 上所有 decision model](https://openrouter.ai/models?output_modalities=decisions)：它們共用同一個 decisions 端點與請求格式，只要用 `BIG2_AI_MODEL` 指定 model 即可切換（仍需要 `OPENROUTER_API_KEY`）。例如改用 [kev-4b](https://openrouter.ai/jaredpalmer/kev-4b)：
+```sh
+export BIG2_AI_MODEL=jaredpalmer/kev-4b
+```
+注意各 model 的 context 長度不同（例如 kev-4b 為 8K tokens）。目前只實測過 jev 與 kev-4b。
+
 ### 改用本機 AI 伺服器（選用）
 預設連 OpenRouter 上的 jev。設定下列環境變數，可改把同樣格式的請求送到本機的 `rapid-mlx system-one`（laya）伺服器；此時不需要 `OPENROUTER_API_KEY`：
 ```sh

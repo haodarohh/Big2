@@ -1,4 +1,4 @@
-"""Thin client for OpenRouter's jev-1.13 decision model.
+"""Thin client for OpenRouter decision models (default: jev-1.13).
 
 jev answers structured `choice` questions (pick one key out of a fixed set)
 rather than generating free text, so it can never return cards that aren't
@@ -24,14 +24,14 @@ MODEL_ENV = "BIG2_AI_MODEL"
 REQUEST_TIMEOUT_SECONDS = 30
 
 
-class JevError(Exception):
-    """Raised for any failure to get a usable choice back from jev."""
+class DecisionError(Exception):
+    """Raised for any failure to get a usable choice back from the decision model."""
 
 
 def request_choice(state: str, options: dict[str, str]) -> str:
-    """Ask jev to pick one key from `options`, given `state` as context.
+    """Ask the decision model to pick one key from `options`, given `state` as context.
 
-    Returns the chosen option key. Raises JevError on network failure,
+    Returns the chosen option key. Raises DecisionError on network failure,
     non-2xx response, or a response that doesn't name one of `options`.
     """
     url = os.environ.get(URL_ENV) or DECISIONS_URL
@@ -39,7 +39,7 @@ def request_choice(state: str, options: dict[str, str]) -> str:
     # Only the hosted default needs a key; a local server runs without
     # --api-key, so demanding one there would block laya for no reason.
     if url == DECISIONS_URL and not api_key:
-        raise JevError("OPENROUTER_API_KEY environment variable is not set")
+        raise DecisionError("OPENROUTER_API_KEY environment variable is not set")
 
     payload = {
         "state": state,
@@ -81,11 +81,11 @@ def request_choice(state: str, options: dict[str, str]) -> str:
         data = response.json()
         choice = data["answers"]["move"]["choice"]
     except requests.RequestException as exc:
-        raise JevError(f"request to jev failed: {exc}") from exc
+        raise DecisionError(f"request to decision model failed: {exc}") from exc
     except (KeyError, ValueError) as exc:
-        raise JevError(f"unexpected response shape from jev: {exc}") from exc
+        raise DecisionError(f"unexpected response shape from decision model: {exc}") from exc
 
     if choice not in options:
-        raise JevError(f"jev returned unknown option key: {choice!r}")
+        raise DecisionError(f"decision model returned unknown option key: {choice!r}")
 
     return choice

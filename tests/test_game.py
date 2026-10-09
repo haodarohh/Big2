@@ -6,10 +6,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from big2.ai_jev import JevError
+from big2.ai_decision import DecisionError
 from big2.cards import THREE_OF_CLUBS, Card, Rank, Suit
 from big2.combos import all_combos
-from big2.game import MAX_JEV_RETRIES, AIController, GameEngine, deal, find_starting_player, run_ai_batch, run_game
+from big2.game import MAX_DECISION_RETRIES, AIController, GameEngine, deal, find_starting_player, run_ai_batch, run_game
 from big2.logging_util import GameLogger
 from big2.rules import beats, classify
 
@@ -188,11 +188,11 @@ def test_illegal_choice_can_retry_to_pass(monkeypatch, tmp_path):
 def test_following_falls_back_to_pass_after_errors(monkeypatch, tmp_path):
     """Five external failures exhaust retries and pass when following."""
     logger = GameLogger(tmp_path)
-    request = Mock(side_effect=JevError("unavailable"))
+    request = Mock(side_effect=DecisionError("unavailable"))
     monkeypatch.setattr("big2.game.request_choice", request)
     result = AIController("AI", logger).choose_move([THREE_OF_CLUBS], classify([Card(Rank.FIVE, Suit.CLUB)]), False, False)
     assert result is None
-    assert request.call_count == MAX_JEV_RETRIES
+    assert request.call_count == MAX_DECISION_RETRIES
     records = [json.loads(line) for line in logger.path.read_text().splitlines()]
     assert records[-1]["event"] == "ai_retries_exhausted"
 
@@ -200,11 +200,11 @@ def test_following_falls_back_to_pass_after_errors(monkeypatch, tmp_path):
 def test_opening_falls_back_to_three_of_clubs_after_errors(monkeypatch, tmp_path):
     """An opening seat must still play 3♣ after five model failures."""
     logger = GameLogger(tmp_path)
-    request = Mock(side_effect=JevError("unavailable"))
+    request = Mock(side_effect=DecisionError("unavailable"))
     monkeypatch.setattr("big2.game.request_choice", request)
     result = AIController("AI", logger).choose_move([Card(Rank.FIVE, Suit.CLUB), THREE_OF_CLUBS], None, True, True)
     assert result == classify([THREE_OF_CLUBS])
-    assert request.call_count == MAX_JEV_RETRIES
+    assert request.call_count == MAX_DECISION_RETRIES
     records = [json.loads(line) for line in logger.path.read_text().splitlines()]
     assert records[-1]["event"] == "ai_retries_exhausted"
 
@@ -212,12 +212,12 @@ def test_opening_falls_back_to_three_of_clubs_after_errors(monkeypatch, tmp_path
 def test_leading_falls_back_to_smallest_single_after_errors(monkeypatch, tmp_path):
     """A later leader falls back to its smallest single without an opening restriction."""
     logger = GameLogger(tmp_path)
-    request = Mock(side_effect=JevError("unavailable"))
+    request = Mock(side_effect=DecisionError("unavailable"))
     monkeypatch.setattr("big2.game.request_choice", request)
     four = Card(Rank.FOUR, Suit.CLUB)
     result = AIController("AI", logger).choose_move([Card(Rank.FIVE, Suit.CLUB), four], None, True, False)
     assert result == classify([four])
-    assert request.call_count == MAX_JEV_RETRIES
+    assert request.call_count == MAX_DECISION_RETRIES
 
 
 def test_exhausted_retries_and_summary_are_logged(monkeypatch, tmp_path):

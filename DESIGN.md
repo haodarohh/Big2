@@ -3,16 +3,16 @@
 ## 技術棧
 - 語言：Python
 - 執行方式：`uv run big2`（CLI）或 `uv run big2 --server-mode`（瀏覽器版，uv 專案，`pyproject.toml` 管理相依套件）
-- HTTP client（呼叫 jev）：`requests`
+- HTTP client（呼叫 decision model）：`requests`
 - Web server：Flask，靜態檔案（`src/big2/static/index.html`/`app.js`/`style.css`）+ 幾個 JSON API
-- AI 對手：OpenRouter `POST https://openrouter.ai/api/alpha/decisions`，model `typesafe/jev-1.13`
+- AI 對手：OpenRouter `POST https://openrouter.ai/api/alpha/decisions`，model 預設 `typesafe/jev-1.13`；設 `BIG2_AI_MODEL=jaredpalmer/kev-4b` 可改用 kev-4b（同端點、同請求/回應格式）
 - API key：環境變數 `OPENROUTER_API_KEY`
 
 ## 架構：CLI 與瀏覽器版共用的部分
 - `game.py` 的 `GameEngine`（誰的回合、目前要求的牌型、一輪全過牌後控制權回到最後出牌者、有人出完牌）是兩種介面共用的核心狀態機，`apply(move)` 是唯一的變動入口
 - CLI（`run_game`）直接在 `GameEngine` 上為每個座位（含真人）阻塞呼叫 `Controller.choose_move`
 - 瀏覽器版（`web.py`）不會對真人座位呼叫 `choose_move`（那會卡在 `input()`）：真人的出牌由 HTTP request 提供，經 `validate_move` 驗證合法性後直接 `GameEngine.apply`；開局先回傳初始牌桌，真人出牌只回傳該手事件；對戰與觀戰皆由 `/api/ai_turn` 每次前進一個 AI 回合，直到輪到真人或遊戲結束
-- 兩種介面都用同一個 `AIController`（同一套呼叫 jev、重試、fallback 的邏輯）與同一個 `GameLogger`（`logs/game-<timestamp>.jsonl`）
+- 兩種介面都用同一個 `AIController`（同一套呼叫 decision model、重試、fallback 的邏輯）與同一個 `GameLogger`（`logs/game-<timestamp>.jsonl`）
 
 ## 瀏覽器版 API（單一全域對局，無 session id）
 - `GET /`：回應 `static/index.html`

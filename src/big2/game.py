@@ -1,4 +1,4 @@
-"""Game state machine and the two seat controllers (human / jev-backed AI).
+"""Game state machine and the two seat controllers (human / model-backed AI).
 
 `run_game` only knows about the `Controller` protocol below — each
 controller is responsible for returning an already-legal move (or None for
@@ -18,13 +18,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from .ai_jev import JevError, request_choice
+from .ai_decision import DecisionError, request_choice
 from .cards import THREE_OF_CLUBS, Card, shuffled_deck
 from .combos import all_combos
 from .logging_util import GameLogger
 from .rules import Combo, HandType, beats, classify
 
-MAX_JEV_RETRIES = 10
+MAX_DECISION_RETRIES = 10
 
 PERSONALITIES = {
     "balanced": "Balance preserving strong combinations, gaining control, and making progress toward emptying your hand.",
@@ -154,7 +154,7 @@ class AIController:
     def choose_move(self, hand, required, is_leading, must_include_3c, context=None):
         """Return a validated combo or pass using hand, trick and public context.
 
-        Calls the model and writes decision logs, retrying up to MAX_JEV_RETRIES times;
+        Calls the model and writes decision logs, retrying up to MAX_DECISION_RETRIES times;
         exhaustion passes or leads the smallest permitted single. Does not
         change hand or context or compute strategic option scores.
         """
@@ -172,10 +172,10 @@ class AIController:
         )
         feedback = ""
 
-        for attempt in range(1, MAX_JEV_RETRIES + 1):
+        for attempt in range(1, MAX_DECISION_RETRIES + 1):
             try:
                 choice_key = request_choice(state + feedback, options)
-            except JevError as exc:
+            except DecisionError as exc:
                 self.logger.log({
                     "event": "ai_call_error", "player": self.name, "attempt": attempt, "error": str(exc),
                 })
@@ -214,7 +214,7 @@ class AIController:
             fallback = "pass"
         self.logger.log({
             "event": "ai_retries_exhausted", "player": self.name,
-            "attempts": MAX_JEV_RETRIES, "fallback": fallback,
+            "attempts": MAX_DECISION_RETRIES, "fallback": fallback,
         })
         return fallback_combo
 
